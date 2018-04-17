@@ -134,7 +134,7 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
             },
             State.Float => switch (c) {
                 '}' => {
-                    try formatFloatDecimal(args[next_arg], 0, context, Errors, output);
+                    try formatFloatDecimal(args[next_arg], null, context, Errors, output);
                     next_arg += 1;
                     state = State.Start;
                     start_index = i + 1;
@@ -261,14 +261,14 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
 
     // Errol doesn't handle these special cases.
     if (math.isNan(x)) {
-        return output(context, "NaN");
+        return output(context, "nan");
     }
     if (math.signbit(x)) {
         try output(context, "-");
         x = -x;
     }
     if (math.isPositiveInf(x)) {
-        return output(context, "Infinity");
+        return output(context, "inf");
     }
     if (x == 0.0) {
         return output(context, "0.0");
@@ -294,43 +294,117 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
     }
 }
 
-pub fn formatFloatDecimal(value: var, precision: usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
+// Print a float of the format x.yyyyy where the number of y is specified by the precision argument.
+// The default precision is 5, values are rounded to the nearest value according to the precision.
+pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
     var x = f64(value);
+    const precision = prec ?? 5;
 
     // Errol doesn't handle these special cases.
     if (math.isNan(x)) {
-        return output(context, "NaN");
+        return output(context, "nan");
     }
+
     if (math.signbit(x)) {
         try output(context, "-");
         x = -x;
     }
+
     if (math.isPositiveInf(x)) {
-        return output(context, "Infinity");
+        return output(context, "inf");
     }
+
     if (x == 0.0) {
-        return output(context, "0.0");
+        try output(context, "0.");
+
+        var i: usize = 0;
+        while (i < precision) : (i += 1) {
+            try output(context, "0");
+        }
+        return;
     }
 
+    // non-special case, use errol3
     var buffer: [32]u8 = undefined;
-    const float_decimal = errol3(x, buffer[0..]);
+    var float_decimal = errol3(x, buffer[0..]);
 
-    const num_left_digits = if (float_decimal.exp > 0) usize(float_decimal.exp) else 1;
+    // Find the digit which will signify the round point and start rounding backwards.
+    const round_digit = if (float_decimal.exp >= 0) precision + usize(float_decimal.exp) else precision;
+    if (round_digit < float_decimal.digits.len and float_decimal.digits[round_digit] - '0' >= 5) {
+        debug.assert(round_digit >= 0);
 
-    try output(context, float_decimal.digits[0 .. num_left_digits]);
-    try output(context, ".");
-    if (float_decimal.digits.len > 1) {
-        const num_valid_digtis = if (@typeOf(value) == f32)  math.min(usize(7), float_decimal.digits.len)
-        else
-            float_decimal.digits.len;
+        var i = round_digit;
+        while (true) {
+            if (i == 0) {
+                // Rounded all the way past the start. This was of the form 9.999...
+                // If the exponent is positive we have an extra digit and handle by printing
+                // immediately to avoid reshuffling the buffer.
+                // If negative, increase exp to adjust the zero-padding.
+                if (float_decimal.exp > 0) {
+                    try output(context , "1");
+                } else {
+                    float_decimal.exp += 1;
+                }
+                break;
+            }
 
-        const num_right_digits = if (precision != 0)
-            math.min(precision, (num_valid_digtis-num_left_digits))
-        else
-            num_valid_digtis - num_left_digits;
-        try output(context, float_decimal.digits[num_left_digits .. (num_left_digits + num_right_digits)]);
+            i -= 1;
+
+            const new_value = (float_decimal.digits[i] - '0' + 1) % 10;
+            float_decimal.digits[i] = new_value + '0';
+
+            // must continue rounding until non-9
+            if (new_value != 0) {
+                break;
+            }
+        }
+    }
+
+    // exp < 0 means the leading is always 0 as errol result is normalized.
+    const num_digits_whole = if (float_decimal.exp >= 0) usize(float_decimal.exp) else 0;
+    if (num_digits_whole > 0) {
+        try output(context, float_decimal.digits[0 .. num_digits_whole]);
     } else {
-        try output(context, "0");
+        try output(context , "0");
+    }
+
+    // {.0} special case doesn't want a trailing '.'
+    if (precision == 0) {
+        return;
+    }
+
+    try output(context, ".");
+
+    // Keep track of fractional count printed for case where we pre-pad then post-pad with 0's.
+    var printed: usize = 0;
+
+    // Zero-fill until we reach significant digits or run out of precision.
+    if (float_decimal.exp < 0) {
+        const zero_digit_count = usize(-float_decimal.exp);
+
+        var i: usize = 0;
+        while (i < zero_digit_count and i < precision) : (i += 1) {
+            try output(context, "0");
+            printed += 1;
+        }
+
+        if (i >= precision) {
+            return;
+        }
+    }
+
+    // Remaining fractional portion, zero-padding till desired precision.
+    const remaining_digits = float_decimal.digits.len - num_digits_whole;
+    if (precision < remaining_digits) {
+        try output(context, float_decimal.digits[num_digits_whole .. num_digits_whole + precision]);
+        return;
+    } else {
+        try output(context, float_decimal.digits[num_digits_whole ..]);
+        printed += float_decimal.digits.len - num_digits_whole;
+
+        while (printed < precision) : (printed += 1) {
+            try output(context, "0");
+        }
     }
 }
 
@@ -612,17 +686,17 @@ test "fmt.format" {
         {
             var buf1: [32]u8 = undefined;
             const result = try bufPrint(buf1[0..], "f64: {}\n", math.nan_f64);
-            assert(mem.eql(u8, result, "f64: NaN\n"));
+            assert(mem.eql(u8, result, "f64: nan\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const result = try bufPrint(buf1[0..], "f64: {}\n", math.inf_f64);
-            assert(mem.eql(u8, result, "f64: Infinity\n"));
+            assert(mem.eql(u8, result, "f64: inf\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const result = try bufPrint(buf1[0..], "f64: {}\n", -math.inf_f64);
-            assert(mem.eql(u8, result, "f64: -Infinity\n"));
+            assert(mem.eql(u8, result, "f64: -inf\n"));
         }
         {
             var buf1: [32]u8 = undefined;
@@ -634,15 +708,15 @@ test "fmt.format" {
             var buf1: [32]u8 = undefined;
             const value: f32 = 1234.567;
             const result = try bufPrint(buf1[0..], "f32: {.2}\n", value);
-            assert(mem.eql(u8, result, "f32: 1234.56\n"));
+            assert(mem.eql(u8, result, "f32: 1234.57\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = -11.1234;
             const result = try bufPrint(buf1[0..], "f32: {.4}\n", value);
             // -11.1234 is converted to f64 -11.12339... internally (errol3() function takes f64).
-            // -11.12339... is truncated to -11.1233
-            assert(mem.eql(u8, result, "f32: -11.1233\n"));
+            // -11.12339... is rounded back up to -11.1234
+            assert(mem.eql(u8, result, "f32: -11.1234\n"));
         }
         {
             var buf1: [32]u8 = undefined;
@@ -656,7 +730,48 @@ test "fmt.format" {
             const result = try bufPrint(buf1[0..], "f64: {.10}\n", value);
             assert(mem.eql(u8, result, "f64: 91.1234567890\n"));
         }
-
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 0.0;
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 5.700;
+            const result = try bufPrint(buf1[0..], "f64: {.0}\n", value);
+            assert(mem.eql(u8, result, "f64: 6\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 9.999;
+            const result = try bufPrint(buf1[0..], "f64: {.1}\n", value);
+            assert(mem.eql(u8, result, "f64: 10.0\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 1.0;
+            const result = try bufPrint(buf1[0..], "f64: {.3}\n", value);
+            assert(mem.eql(u8, result, "f64: 1.000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 0.0003;
+            const result = try bufPrint(buf1[0..], "f64: {.8}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00030000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 1.40130e-45;
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 9.999960e-40;
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00000\n"));
+        }
     }
 }
 
