@@ -807,7 +807,7 @@ test "fmt.format" {
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00000\n"));
         }
-        // libc differences
+        // libc checks
         {
             var buf1: [32]u8 = undefined;
             const value: f64 = f64(@bitCast(f32, u32(916964781)));
@@ -819,6 +819,22 @@ test "fmt.format" {
             const value: f64 = f64(@bitCast(f32, u32(925353389)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00001\n"));
+        }
+        // libc differences
+        {
+            var buf1: [32]u8 = undefined;
+            // This is 0.015625 exactly according to gdb. We thus round down,
+            // however glibc rounds up for some reason.
+            const value: f64 = f64(@bitCast(f32, u32(1015021568)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.01563\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            // 0.078125 -> zig: 0.07813 vs. c: 0.07812
+            const value: f64 = f64(@bitCast(f32, u32(1033895936)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.07813\n"));
         }
     }
 }
