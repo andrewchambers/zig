@@ -380,7 +380,7 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     }
 
     // exp < 0 means the leading is always 0 as errol result is normalized.
-    const num_digits_whole = if (float_decimal.exp >= 0) usize(float_decimal.exp) else 0;
+    const num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
     if (num_digits_whole > 0) {
         try output(context, float_decimal.digits[0 .. num_digits_whole]);
     } else {
@@ -398,7 +398,7 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     var printed: usize = 0;
 
     // Zero-fill until we reach significant digits or run out of precision.
-    if (float_decimal.exp < 0) {
+    if (float_decimal.exp <= 0) {
         const zero_digit_count = usize(-float_decimal.exp);
 
         // Only zeros to print, full the buffer.
@@ -819,6 +819,12 @@ test "fmt.format" {
             const value: f64 = f64(@bitCast(f32, u32(925353389)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00001\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(1036831278)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.10000\n"));
         }
         // libc differences
         {
