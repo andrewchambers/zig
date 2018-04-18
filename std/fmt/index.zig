@@ -380,9 +380,17 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     }
 
     // exp < 0 means the leading is always 0 as errol result is normalized.
-    const num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
+    var num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
     if (num_digits_whole > 0) {
-        try output(context, float_decimal.digits[0 .. num_digits_whole]);
+        // Edge case, if we rounded a float with exp = 0 up to exp 1 with a leading zero then
+        // we do not want to print from the buffer and need to reset num_digits_whole
+        // back to 0 to print the fractional part correctly.
+        if (num_digits_whole == 1 and need_fractional_leading_one) {
+            try output(context, "1");
+            num_digits_whole = 0;
+        } else {
+            try output(context, float_decimal.digits[0 .. num_digits_whole]);
+        }
     } else {
         try output(context , "0");
     }
@@ -826,6 +834,13 @@ test "fmt.format" {
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.10000\n"));
         }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(1065353133)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            std.debug.warn("{}\n", result);
+            assert(mem.eql(u8, result, "f64: 1.00000\n"));
+        }
         // libc differences
         {
             var buf1: [32]u8 = undefined;
@@ -841,6 +856,20 @@ test "fmt.format" {
             const value: f64 = f64(@bitCast(f32, u32(1033895936)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.07813\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            // 0.140625 -> zig: 0.14063 vs. c: 0.14062
+            const value: f64 = f64(@bitCast(f32, u32(1041235968)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.14063\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            // 0.203125 -> zig: 0.20313 vs. c: 0.20312
+            const value: f64 = f64(@bitCast(f32, u32(1045430272)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.20313\n"));
         }
     }
 }
