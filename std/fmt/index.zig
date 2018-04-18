@@ -381,6 +381,10 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
 
     // exp < 0 means the leading is always 0 as errol result is normalized.
     var num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
+
+    // the actual slice into the buffer, we may need to zero-pad between num_digits_whole and this.
+    var num_digits_whole_no_pad = math.min(num_digits_whole, float_decimal.digits.len);
+
     if (num_digits_whole > 0) {
         // Edge case, if we rounded a float with exp = 0 up to exp 1 with a leading zero then
         // we do not want to print from the buffer and need to reset num_digits_whole
@@ -388,8 +392,15 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
         if (num_digits_whole == 1 and need_fractional_leading_one) {
             try output(context, "1");
             num_digits_whole = 0;
+            num_digits_whole_no_pad = 0;
         } else {
-            try output(context, float_decimal.digits[0 .. num_digits_whole]);
+            // We may have to zero pad, for instance 1e4 requires zero padding.
+            try output(context, float_decimal.digits[0 .. num_digits_whole_no_pad]);
+
+            var i = num_digits_whole_no_pad;
+            while (i < num_digits_whole) : (i += 1) {
+                try output(context, "0");
+            }
         }
     } else {
         try output(context , "0");
@@ -438,12 +449,12 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
 
     // Remaining fractional portion, zero-padding if insufficient.
     debug.assert(precision >= printed);
-    if (num_digits_whole + precision - printed < float_decimal.digits.len) {
-        try output(context, float_decimal.digits[num_digits_whole .. num_digits_whole + precision - printed]);
+    if (num_digits_whole_no_pad + precision - printed < float_decimal.digits.len) {
+        try output(context, float_decimal.digits[num_digits_whole_no_pad .. num_digits_whole_no_pad + precision - printed]);
         return;
     } else {
-        try output(context, float_decimal.digits[num_digits_whole ..]);
-        printed += float_decimal.digits.len - num_digits_whole;
+        try output(context, float_decimal.digits[num_digits_whole_no_pad ..]);
+        printed += float_decimal.digits.len - num_digits_whole_no_pad;
 
         while (printed < precision) : (printed += 1) {
             try output(context, "0");
@@ -838,38 +849,23 @@ test "fmt.format" {
             var buf1: [32]u8 = undefined;
             const value: f64 = f64(@bitCast(f32, u32(1065353133)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
-            std.debug.warn("{}\n", result);
             assert(mem.eql(u8, result, "f64: 1.00000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(1092616192)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 10.00000\n"));
         }
         // libc differences
         {
             var buf1: [32]u8 = undefined;
             // This is 0.015625 exactly according to gdb. We thus round down,
-            // however glibc rounds up for some reason.
+            // however glibc rounds up for some reason. This occurs for all
+            // floats of the form x.yyyy25 on a precision point.
             const value: f64 = f64(@bitCast(f32, u32(1015021568)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.01563\n"));
-        }
-        {
-            var buf1: [32]u8 = undefined;
-            // 0.078125 -> zig: 0.07813 vs. c: 0.07812
-            const value: f64 = f64(@bitCast(f32, u32(1033895936)));
-            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
-            assert(mem.eql(u8, result, "f64: 0.07813\n"));
-        }
-        {
-            var buf1: [32]u8 = undefined;
-            // 0.140625 -> zig: 0.14063 vs. c: 0.14062
-            const value: f64 = f64(@bitCast(f32, u32(1041235968)));
-            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
-            assert(mem.eql(u8, result, "f64: 0.14063\n"));
-        }
-        {
-            var buf1: [32]u8 = undefined;
-            // 0.203125 -> zig: 0.20313 vs. c: 0.20312
-            const value: f64 = f64(@bitCast(f32, u32(1045430272)));
-            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
-            assert(mem.eql(u8, result, "f64: 0.20313\n"));
         }
     }
 }
