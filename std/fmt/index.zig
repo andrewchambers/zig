@@ -328,8 +328,25 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     var buffer: [32]u8 = undefined;
     var float_decimal = errol3(x, buffer[0..]);
 
+    // The round digit refers to the index which we should look at to determine
+    // whether we need to round to match the specified precision.
+    var round_digit: usize = 0;
+    if (float_decimal.exp >= 0) {
+        round_digit = precision + usize(float_decimal.exp);
+    } else {
+        // if a small negative exp, then adjust we need to offset by the number
+        // of leading zeros that will occur.
+        const min_exp_required = usize(-float_decimal.exp);
+        if (precision > min_exp_required) {
+            round_digit = precision - min_exp_required;
+        }
+    }
+
+    // It suffices to look at just this digit. We don't round and propagate say 0.04999 to 0.05
+    // first, and then to 0.1 in the case of a {.1} single precision.
+    var need_fractional_leading_one = false;
+
     // Find the digit which will signify the round point and start rounding backwards.
-    const round_digit = if (float_decimal.exp >= 0) precision + usize(float_decimal.exp) else precision;
     if (round_digit < float_decimal.digits.len and float_decimal.digits[round_digit] - '0' >= 5) {
         debug.assert(round_digit >= 0);
 
@@ -343,6 +360,8 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
                 if (float_decimal.exp > 0) {
                     try output(context , "1");
                 } else {
+                    // We need to append a 1, but after we have performed 0 padding so delay.
+                    need_fractional_leading_one = true;
                     float_decimal.exp += 1;
                 }
                 break;
@@ -382,20 +401,35 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     if (float_decimal.exp < 0) {
         const zero_digit_count = usize(-float_decimal.exp);
 
-        var i: usize = 0;
-        while (i < zero_digit_count and i < precision) : (i += 1) {
-            try output(context, "0");
-            printed += 1;
+        // Only zeros to print, full the buffer.
+        if (zero_digit_count >= precision) {
+            var i: usize = 0;
+            while (i < precision) : (i += 1) {
+                try output(context, "0");
+            }
+            return;
+        }
+        // Zeros followed by possible fractional round-up
+        else {
+            var i: usize = 0;
+            while (i < zero_digit_count) : (i += 1) {
+                try output(context, "0");
+                printed += 1;
+            }
+
+            if (need_fractional_leading_one) {
+                try output(context, "1");
+                printed += 1;
+            }
         }
 
-        if (i >= precision) {
+        if (printed >= precision) {
             return;
         }
     }
 
-    // Remaining fractional portion, zero-padding till desired precision.
-    const remaining_digits = float_decimal.digits.len - num_digits_whole;
-    if (precision < remaining_digits) {
+    // Remaining fractional portion, zero-padding if insufficient.
+    if (precision < float_decimal.digits.len) {
         try output(context, float_decimal.digits[num_digits_whole .. num_digits_whole + precision]);
         return;
     } else {
@@ -771,6 +805,12 @@ test "fmt.format" {
             const value: f64 = 9.999960e-40;
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(916964781)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00001\n"));
         }
     }
 }
