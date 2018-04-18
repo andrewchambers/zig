@@ -429,8 +429,9 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     }
 
     // Remaining fractional portion, zero-padding if insufficient.
-    if (precision < float_decimal.digits.len) {
-        try output(context, float_decimal.digits[num_digits_whole .. num_digits_whole + precision]);
+    debug.assert(precision >= printed);
+    if (num_digits_whole + precision - printed < float_decimal.digits.len) {
+        try output(context, float_decimal.digits[num_digits_whole .. num_digits_whole + precision - printed]);
         return;
     } else {
         try output(context, float_decimal.digits[num_digits_whole ..]);
@@ -806,9 +807,16 @@ test "fmt.format" {
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00000\n"));
         }
+        // libc differences
         {
             var buf1: [32]u8 = undefined;
             const value: f64 = f64(@bitCast(f32, u32(916964781)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 0.00001\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(925353389)));
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00001\n"));
         }
