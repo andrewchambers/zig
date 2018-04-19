@@ -857,6 +857,15 @@ test "fmt.format" {
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 10.00000\n"));
         }
+        {
+            // errol3 rounds to ... 630 but libc rounds to ...632. Grisu3
+            // also rounds to 630 so I'm inclined to believe libc is not
+            // optimal here.
+            var buf1: [32]u8 = undefined;
+            const value: f64 = f64(@bitCast(f32, u32(1518338049)));
+            const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
+            assert(mem.eql(u8, result, "f64: 18014400656965630.00000\n"));
+        }
         // libc differences
         {
             var buf1: [32]u8 = undefined;
