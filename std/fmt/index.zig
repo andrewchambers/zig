@@ -260,12 +260,13 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
     var x = f64(value);
 
     // Errol doesn't handle these special cases.
-    if (math.isNan(x)) {
-        return output(context, "nan");
-    }
     if (math.signbit(x)) {
         try output(context, "-");
         x = -x;
+    }
+
+    if (math.isNan(x)) {
+        return output(context, "nan");
     }
     if (math.isPositiveInf(x)) {
         return output(context, "inf");
@@ -301,19 +302,17 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
     const precision = prec ?? 5;
 
     // Errol doesn't handle these special cases.
-    if (math.isNan(x)) {
-        return output(context, "nan");
-    }
-
     if (math.signbit(x)) {
         try output(context, "-");
         x = -x;
     }
 
+    if (math.isNan(x)) {
+        return output(context, "nan");
+    }
     if (math.isPositiveInf(x)) {
         return output(context, "inf");
     }
-
     if (x == 0.0) {
         try output(context, "0.");
 
@@ -741,6 +740,11 @@ test "fmt.format" {
             var buf1: [32]u8 = undefined;
             const result = try bufPrint(buf1[0..], "f64: {}\n", math.nan_f64);
             assert(mem.eql(u8, result, "f64: nan\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const result = try bufPrint(buf1[0..], "f64: {}\n", -math.nan_f64);
+            assert(mem.eql(u8, result, "f64: -nan\n"));
         }
         {
             var buf1: [32]u8 = undefined;
