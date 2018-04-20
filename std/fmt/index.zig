@@ -275,7 +275,7 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
         return output(context, "inf");
     }
     if (x == 0.0) {
-        return output(context, "0.0e0");
+        return output(context, "0.0e+0");
     }
 
     var buffer: [32]u8 = undefined;
@@ -295,7 +295,12 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
     }
 
     try output(context, "e");
-    try formatInt(float_decimal.exp - 1, 10, false, 0, context, Errors, output);
+
+    const exp = float_decimal.exp - 1;
+    if (exp >= 0) {
+        try output(context, "+");
+    }
+    try formatInt(exp, 10, false, 0, context, Errors, output);
 }
 
 // Print a float of the format x.yyyyy where the number of y is specified by the precision argument.
@@ -731,19 +736,19 @@ test "fmt.format" {
             var buf1: [32]u8 = undefined;
             const value: f32 = 1.34;
             const result = try bufPrint(buf1[0..], "f32: {}\n", value);
-            assert(mem.eql(u8, result, "f32: 1.34000003e0\n"));
+            assert(mem.eql(u8, result, "f32: 1.34000003e+0\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = 12.34;
             const result = try bufPrint(buf1[0..], "f32: {}\n", value);
-            assert(mem.eql(u8, result, "f32: 1.23400001e1\n"));
+            assert(mem.eql(u8, result, "f32: 1.23400001e+1\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f64 = -12.34e10;
             const result = try bufPrint(buf1[0..], "f64: {}\n", value);
-            assert(mem.eql(u8, result, "f64: -1.234e11\n"));
+            assert(mem.eql(u8, result, "f64: -1.234e+11\n"));
         }
         {
             var buf1: [32]u8 = undefined;
