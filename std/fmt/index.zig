@@ -86,7 +86,8 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
                 },
                 's' => {
                     state = State.Buf;
-                },'.' => {
+                },
+                '.' => {
                     state = State.Float;
                 },
                 else => @compileError("Unknown format character: " ++ []u8{c}),
@@ -256,6 +257,8 @@ pub fn formatBuf(buf: []const u8, width: usize,
     }
 }
 
+// Print a float in scientific notation to full precision. Values are never rounded.
+// It should be the case that every printed value can be re-parsed back to the same type unambiguously.
 pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
     var x = f64(value);
 
@@ -272,11 +275,12 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
         return output(context, "inf");
     }
     if (x == 0.0) {
-        return output(context, "0.0");
+        return output(context, "0.0e0");
     }
 
     var buffer: [32]u8 = undefined;
     const float_decimal = errol3(x, buffer[0..]);
+
     try output(context, float_decimal.digits[0..1]);
     try output(context, ".");
     if (float_decimal.digits.len > 1) {
@@ -284,15 +288,14 @@ pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@
             math.min(usize(9), float_decimal.digits.len)
         else
             float_decimal.digits.len;
+
         try output(context, float_decimal.digits[1 .. num_digits]);
     } else {
         try output(context, "0");
     }
 
-    if (float_decimal.exp != 1) {
-        try output(context, "e");
-        try formatInt(float_decimal.exp - 1, 10, false, 0, context, Errors, output);
-    }
+    try output(context, "e");
+    try formatInt(float_decimal.exp - 1, 10, false, 0, context, Errors, output);
 }
 
 // Print a float of the format x.yyyyy where the number of y is specified by the precision argument.
@@ -726,6 +729,12 @@ test "fmt.format" {
     if (builtin.mode == builtin.Mode.Debug) {
         {
             var buf1: [32]u8 = undefined;
+            const value: f32 = 1.34;
+            const result = try bufPrint(buf1[0..], "f32: {}\n", value);
+            assert(mem.eql(u8, result, "f32: 1.34000003e0\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
             const value: f32 = 12.34;
             const result = try bufPrint(buf1[0..], "f32: {}\n", value);
             assert(mem.eql(u8, result, "f32: 1.23400001e1\n"));
@@ -829,6 +838,12 @@ test "fmt.format" {
             const value: f64 = 9.999960e-40;
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00000\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 9.999960e-40;
+            const result = try bufPrint(buf1[0..], "f64: {}\n", value);
+            assert(mem.eql(u8, result, "f64: 9.99996e-40\n"));
         }
         // libc checks
         {
