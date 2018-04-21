@@ -164,7 +164,7 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
             },
             State.Float => switch (c) {
                 '}' => {
-                    try formatFloatDecimal(args[next_arg], 5, context, Errors, output);
+                    try formatFloatDecimal(args[next_arg], null, context, Errors, output);
                     next_arg += 1;
                     state = State.Start;
                     start_index = i + 1;
