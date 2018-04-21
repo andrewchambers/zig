@@ -22,6 +22,8 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
         IntegerWidth,
         Float,
         FloatWidth,
+        FloatScientific,
+        FloatScientificWidth,
         Character,
         Buf,
         BufWidth,
@@ -87,6 +89,9 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
                 's' => {
                     state = State.Buf;
                 },
+                'e' => {
+                    state = State.FloatScientific;
+                },
                 '.' => {
                     state = State.Float;
                 },
@@ -126,6 +131,30 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
                 '}' => {
                     width = comptime (parseUnsigned(usize, fmt[width_start..i], 10) catch unreachable);
                     try formatInt(args[next_arg], radix, uppercase, width, context, Errors, output);
+                    next_arg += 1;
+                    state = State.Start;
+                    start_index = i + 1;
+                },
+                '0' ... '9' => {},
+                else => @compileError("Unexpected character in format string: " ++ []u8{c}),
+            },
+            State.FloatScientific => switch (c) {
+                '}' => {
+                    try formatFloatScientific(args[next_arg], null, context, Errors, output);
+                    next_arg += 1;
+                    state = State.Start;
+                    start_index = i + 1;
+                },
+                '0' ... '9' => {
+                    width_start = i;
+                    state = State.FloatScientificWidth;
+                },
+                else => @compileError("Unexpected character in format string: " ++ []u8{c}),
+            },
+            State.FloatScientificWidth => switch (c) {
+                '}' => {
+                    width = comptime (parseUnsigned(usize, fmt[width_start..i], 10) catch unreachable);
+                    try formatFloatScientific(args[next_arg], width, context, Errors, output);
                     next_arg += 1;
                     state = State.Start;
                     start_index = i + 1;
@@ -199,7 +228,7 @@ pub fn formatValue(value: var, context: var, comptime Errors: type, output: fn(@
             return formatInt(value, 10, false, 0, context, Errors, output);
         },
         builtin.TypeId.Float => {
-            return formatFloat(value, context, Errors, output);
+            return formatFloatScientific(value, null, context, Errors, output);
         },
         builtin.TypeId.Void => {
             return output(context, "void");
@@ -259,7 +288,7 @@ pub fn formatBuf(buf: []const u8, width: usize,
 
 // Print a float in scientific notation to full precision. Values are never rounded.
 // It should be the case that every printed value can be re-parsed back to the same type unambiguously.
-pub fn formatFloat(value: var, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
+pub fn formatFloatScientific(value: var, precision: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
     var x = f64(value);
 
     // Errol doesn't handle these special cases.
@@ -735,20 +764,26 @@ test "fmt.format" {
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = 1.34;
-            const result = try bufPrint(buf1[0..], "f32: {}\n", value);
+            const result = try bufPrint(buf1[0..], "f32: {e}\n", value);
             assert(mem.eql(u8, result, "f32: 1.34000003e+0\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = 12.34;
-            const result = try bufPrint(buf1[0..], "f32: {}\n", value);
+            const result = try bufPrint(buf1[0..], "f32: {e}\n", value);
             assert(mem.eql(u8, result, "f32: 1.23400001e+1\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f64 = -12.34e10;
-            const result = try bufPrint(buf1[0..], "f64: {}\n", value);
+            const result = try bufPrint(buf1[0..], "f64: {e}\n", value);
             assert(mem.eql(u8, result, "f64: -1.234e+11\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 9.999960e-40;
+            const result = try bufPrint(buf1[0..], "f64: {e}\n", value);
+            assert(mem.eql(u8, result, "f64: 9.99996e-40\n"));
         }
         {
             var buf1: [32]u8 = undefined;
@@ -843,12 +878,6 @@ test "fmt.format" {
             const value: f64 = 9.999960e-40;
             const result = try bufPrint(buf1[0..], "f64: {.5}\n", value);
             assert(mem.eql(u8, result, "f64: 0.00000\n"));
-        }
-        {
-            var buf1: [32]u8 = undefined;
-            const value: f64 = 9.999960e-40;
-            const result = try bufPrint(buf1[0..], "f64: {}\n", value);
-            assert(mem.eql(u8, result, "f64: 9.99996e-40\n"));
         }
         // libc checks
         {
