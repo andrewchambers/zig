@@ -4,7 +4,7 @@ const debug = std.debug;
 const assert = debug.assert;
 const mem = std.mem;
 const builtin = @import("builtin");
-const errol3 = @import("errol/index.zig").errol3;
+const errol = @import("errol/index.zig");
 
 const max_int_digits = 65;
 
@@ -164,7 +164,7 @@ pub fn format(context: var, comptime Errors: type, output: fn(@typeOf(context), 
             },
             State.Float => switch (c) {
                 '}' => {
-                    try formatFloatDecimal(args[next_arg], null, context, Errors, output);
+                    try formatFloatDecimal(args[next_arg], 5, context, Errors, output);
                     next_arg += 1;
                     state = State.Start;
                     start_index = i + 1;
@@ -286,9 +286,10 @@ pub fn formatBuf(buf: []const u8, width: usize,
     }
 }
 
-// Print a float in scientific notation to full precision. Values are never rounded.
-// It should be the case that every printed value can be re-parsed back to the same type unambiguously.
-pub fn formatFloatScientific(value: var, precision: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
+// Print a float in scientific notation to the specified precision. Null uses full precision.
+// It should be the case that every full precision, printed value can be re-parsed back to the
+// same type unambiguously.
+pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
     var x = f64(value);
 
     // Errol doesn't handle these special cases.
@@ -304,27 +305,63 @@ pub fn formatFloatScientific(value: var, precision: ?usize, context: var, compti
         return output(context, "inf");
     }
     if (x == 0.0) {
-        return output(context, "0.0e+0");
+        try output(context, "0");
+
+        if (maybe_precision) |precision| {
+            if (precision != 0) {
+                try output(context, ".");
+                var i: usize = 0;
+                while (i < precision) : (i += 1) {
+                    try output(context, "0");
+                }
+            }
+        } else {
+            try output(context, ".0");
+        }
+
+        try output(context, "e+0");
+        return;
     }
 
     var buffer: [32]u8 = undefined;
-    const float_decimal = errol3(x, buffer[0..]);
+    var float_decimal = errol.errol3(x, buffer[0..]);
 
-    try output(context, float_decimal.digits[0..1]);
-    try output(context, ".");
-    if (float_decimal.digits.len > 1) {
-        const num_digits = if (@typeOf(value) == f32)
-            math.min(usize(9), float_decimal.digits.len)
-        else
-            float_decimal.digits.len;
+    if (maybe_precision) |precision| {
+        errol.roundToPrecision(&float_decimal, precision, errol.RoundMode.Scientific);
 
-        try output(context, float_decimal.digits[1 .. num_digits]);
+        try output(context, float_decimal.digits[0..1]);
+
+        // {e0} case prints no `.`
+        if (precision != 0) {
+            try output(context, ".");
+
+            var printed: usize = 0;
+            if (float_decimal.digits.len > 1) {
+                const num_digits = math.min(float_decimal.digits.len - 1, precision);
+                try output(context, float_decimal.digits[1 .. num_digits]);
+                printed += num_digits - 1;
+            }
+
+            while (printed < precision) : (printed += 1) {
+                try output(context, "0");
+            }
+        }
     } else {
-        try output(context, "0");
+        try output(context, float_decimal.digits[0..1]);
+        try output(context, ".");
+        if (float_decimal.digits.len > 1) {
+            const num_digits = if (@typeOf(value) == f32)
+                math.min(usize(9), float_decimal.digits.len)
+            else
+                float_decimal.digits.len;
+
+            try output(context, float_decimal.digits[1 .. num_digits]);
+        } else {
+            try output(context, "0");
+        }
     }
 
     try output(context, "e");
-
     const exp = float_decimal.exp - 1;
     if (exp >= 0) {
         try output(context, "+");
@@ -333,10 +370,9 @@ pub fn formatFloatScientific(value: var, precision: ?usize, context: var, compti
 }
 
 // Print a float of the format x.yyyyy where the number of y is specified by the precision argument.
-// The default precision is 5, values are rounded to the nearest value according to the precision.
-pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
+// By default floats are printed at full precision (no rounding).
+pub fn formatFloatDecimal(value: var, maybe_precision: ?usize, context: var, comptime Errors: type, output: fn(@typeOf(context), []const u8)Errors!void) Errors!void {
     var x = f64(value);
-    const precision = prec ?? 5;
 
     // Errol doesn't handle these special cases.
     if (math.signbit(x)) {
@@ -351,85 +387,39 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
         return output(context, "inf");
     }
     if (x == 0.0) {
-        try output(context, "0.");
+        try output(context, "0");
 
-        var i: usize = 0;
-        while (i < precision) : (i += 1) {
+        if (maybe_precision) |precision| {
+            if (precision != 0) {
+                try output(context, ".");
+                var i: usize = 0;
+                while (i < precision) : (i += 1) {
+                    try output(context, "0");
+                }
+            } else {
+                try output(context, ".0");
+            }
+        } else {
             try output(context, "0");
         }
+
         return;
     }
 
     // non-special case, use errol3
     var buffer: [32]u8 = undefined;
-    var float_decimal = errol3(x, buffer[0..]);
+    var float_decimal = errol.errol3(x, buffer[0..]);
 
-    // The round digit refers to the index which we should look at to determine
-    // whether we need to round to match the specified precision.
-    var round_digit: usize = 0;
-    if (float_decimal.exp >= 0) {
-        round_digit = precision + usize(float_decimal.exp);
-    } else {
-        // if a small negative exp, then adjust we need to offset by the number
-        // of leading zeros that will occur.
-        const min_exp_required = usize(-float_decimal.exp);
-        if (precision > min_exp_required) {
-            round_digit = precision - min_exp_required;
-        }
-    }
+    if (maybe_precision) |precision| {
+        errol.roundToPrecision(&float_decimal, precision, errol.RoundMode.Decimal);
 
-    // It suffices to look at just this digit. We don't round and propagate say 0.04999 to 0.05
-    // first, and then to 0.1 in the case of a {.1} single precision.
-    var need_fractional_leading_one = false;
+        // exp < 0 means the leading is always 0 as errol result is normalized.
+        var num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
 
-    // Find the digit which will signify the round point and start rounding backwards.
-    if (round_digit < float_decimal.digits.len and float_decimal.digits[round_digit] - '0' >= 5) {
-        debug.assert(round_digit >= 0);
+        // the actual slice into the buffer, we may need to zero-pad between num_digits_whole and this.
+        var num_digits_whole_no_pad = math.min(num_digits_whole, float_decimal.digits.len);
 
-        var i = round_digit;
-        while (true) {
-            if (i == 0) {
-                // Rounded all the way past the start. This was of the form 9.999...
-                // If the exponent is positive we have an extra digit and handle by printing
-                // immediately to avoid reshuffling the buffer.
-                // If negative, increase exp to adjust the zero-padding.
-                if (float_decimal.exp > 0) {
-                    try output(context , "1");
-                } else {
-                    // We need to append a 1, but after we have performed 0 padding so delay.
-                    need_fractional_leading_one = true;
-                    float_decimal.exp += 1;
-                }
-                break;
-            }
-
-            i -= 1;
-
-            const new_value = (float_decimal.digits[i] - '0' + 1) % 10;
-            float_decimal.digits[i] = new_value + '0';
-
-            // must continue rounding until non-9
-            if (new_value != 0) {
-                break;
-            }
-        }
-    }
-
-    // exp < 0 means the leading is always 0 as errol result is normalized.
-    var num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
-
-    // the actual slice into the buffer, we may need to zero-pad between num_digits_whole and this.
-    var num_digits_whole_no_pad = math.min(num_digits_whole, float_decimal.digits.len);
-
-    if (num_digits_whole > 0) {
-        // Edge case, if we rounded a float with exp = 0 up to exp 1 with a leading zero then
-        // we do not want to print from the buffer and need to reset num_digits_whole
-        // back to 0 to print the fractional part correctly.
-        if (num_digits_whole == 1 and need_fractional_leading_one) {
-            try output(context, "1");
-            num_digits_whole = 0;
-            num_digits_whole_no_pad = 0;
-        } else {
+        if (num_digits_whole > 0) {
             // We may have to zero pad, for instance 1e4 requires zero padding.
             try output(context, float_decimal.digits[0 .. num_digits_whole_no_pad]);
 
@@ -437,64 +427,81 @@ pub fn formatFloatDecimal(value: var, prec: ?usize, context: var, comptime Error
             while (i < num_digits_whole) : (i += 1) {
                 try output(context, "0");
             }
+        } else {
+            try output(context , "0");
         }
-    } else {
-        try output(context , "0");
-    }
 
-    // {.0} special case doesn't want a trailing '.'
-    if (precision == 0) {
-        return;
-    }
-
-    try output(context, ".");
-
-    // Keep track of fractional count printed for case where we pre-pad then post-pad with 0's.
-    var printed: usize = 0;
-
-    // Zero-fill until we reach significant digits or run out of precision.
-    if (float_decimal.exp <= 0) {
-        const zero_digit_count = usize(-float_decimal.exp);
-
-        // Only zeros to print, full the buffer.
-        if (zero_digit_count >= precision) {
-            var i: usize = 0;
-            while (i < precision) : (i += 1) {
-                try output(context, "0");
-            }
+        // {.0} special case doesn't want a trailing '.'
+        if (precision == 0) {
             return;
         }
-        // Zeros followed by possible fractional round-up
-        else {
+
+        try output(context, ".");
+
+        // Keep track of fractional count printed for case where we pre-pad then post-pad with 0's.
+        var printed: usize = 0;
+
+        // Zero-fill until we reach significant digits or run out of precision.
+        if (float_decimal.exp <= 0) {
+            const zero_digit_count = usize(-float_decimal.exp);
+            const zeros_to_print = math.min(zero_digit_count, precision);
+
+            var i: usize = 0;
+            while (i < zeros_to_print) : (i += 1) {
+                try output(context, "0");
+                printed += 1;
+            }
+
+            if (printed >= precision) {
+                return;
+            }
+        }
+
+        // Remaining fractional portion, zero-padding if insufficient.
+        debug.assert(precision >= printed);
+        if (num_digits_whole_no_pad + precision - printed < float_decimal.digits.len) {
+            try output(context, float_decimal.digits[num_digits_whole_no_pad .. num_digits_whole_no_pad + precision - printed]);
+            return;
+        } else {
+            try output(context, float_decimal.digits[num_digits_whole_no_pad ..]);
+            printed += float_decimal.digits.len - num_digits_whole_no_pad;
+
+            while (printed < precision) : (printed += 1) {
+                try output(context, "0");
+            }
+        }
+    } else {
+        // exp < 0 means the leading is always 0 as errol result is normalized.
+        var num_digits_whole = if (float_decimal.exp > 0) usize(float_decimal.exp) else 0;
+
+        // the actual slice into the buffer, we may need to zero-pad between num_digits_whole and this.
+        var num_digits_whole_no_pad = math.min(num_digits_whole, float_decimal.digits.len);
+
+        if (num_digits_whole > 0) {
+            // We may have to zero pad, for instance 1e4 requires zero padding.
+            try output(context, float_decimal.digits[0 .. num_digits_whole_no_pad]);
+
+            var i = num_digits_whole_no_pad;
+            while (i < num_digits_whole) : (i += 1) {
+                try output(context, "0");
+            }
+        } else {
+            try output(context , "0");
+        }
+
+        try output(context, ".");
+
+        // Zero-fill until we reach significant digits or run out of precision.
+        if (float_decimal.exp <= 0) {
+            const zero_digit_count = usize(-float_decimal.exp);
+
             var i: usize = 0;
             while (i < zero_digit_count) : (i += 1) {
                 try output(context, "0");
-                printed += 1;
-            }
-
-            if (need_fractional_leading_one) {
-                try output(context, "1");
-                printed += 1;
             }
         }
 
-        if (printed >= precision) {
-            return;
-        }
-    }
-
-    // Remaining fractional portion, zero-padding if insufficient.
-    debug.assert(precision >= printed);
-    if (num_digits_whole_no_pad + precision - printed < float_decimal.digits.len) {
-        try output(context, float_decimal.digits[num_digits_whole_no_pad .. num_digits_whole_no_pad + precision - printed]);
-        return;
-    } else {
         try output(context, float_decimal.digits[num_digits_whole_no_pad ..]);
-        printed += float_decimal.digits.len - num_digits_whole_no_pad;
-
-        while (printed < precision) : (printed += 1) {
-            try output(context, "0");
-        }
     }
 }
 
