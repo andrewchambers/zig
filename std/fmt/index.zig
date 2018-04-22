@@ -821,6 +821,14 @@ test "fmt.format" {
             assert(mem.eql(u8, result, "f64: 7.81250e-03\n"));
         }
         {
+            // libc rounds 1.000005e+05 to 1.00000e+05 but zig does 1.00001e+05.
+            // In fact, libc doesn't round a lot of 5 cases up when one past the precision point.
+            var buf1: [32]u8 = undefined;
+            const value: f64 = @bitCast(f32, u32(1203982400));
+            const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
+            assert(mem.eql(u8, result, "f64: 1.00001e+05\n"));
+        }
+        {
             var buf1: [32]u8 = undefined;
             const result = try bufPrint(buf1[0..], "f64: {}\n", math.nan_f64);
             assert(mem.eql(u8, result, "f64: nan\n"));
