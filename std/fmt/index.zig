@@ -363,13 +363,20 @@ pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, 
 
     try output(context, "e");
     const exp = float_decimal.exp - 1;
+
     if (exp >= 0) {
         try output(context, "+");
+        if (exp > -10 and exp < 10) {
+            try output(context, "0");
+        }
+        try formatInt(exp, 10, false, 0, context, Errors, output);
+    } else {
+        try output(context, "-");
+        if (exp > -10 and exp < 10) {
+            try output(context, "0");
+        }
+        try formatInt(-exp, 10, false, 0, context, Errors, output);
     }
-    if (exp > -10 and exp < 10) {
-        try output(context, "0");
-    }
-    try formatInt(exp, 10, false, 0, context, Errors, output);
 }
 
 // Print a float of the format x.yyyyy where the number of y is specified by the precision argument.
@@ -800,6 +807,12 @@ test "fmt.format" {
             const value: f64 = 1.409706e-42;
             const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
             assert(mem.eql(u8, result, "f64: 1.40971e-42\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = @bitCast(f32, u32(814313563));
+            const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
+            assert(mem.eql(u8, result, "f64: 1.00000e-09\n"));
         }
         {
             var buf1: [32]u8 = undefined;
