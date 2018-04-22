@@ -319,7 +319,7 @@ pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, 
             try output(context, ".0");
         }
 
-        try output(context, "e+0");
+        try output(context, "e+00");
         return;
     }
 
@@ -337,9 +337,9 @@ pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, 
 
             var printed: usize = 0;
             if (float_decimal.digits.len > 1) {
-                const num_digits = math.min(float_decimal.digits.len - 1, precision);
+                const num_digits = math.min(float_decimal.digits.len, precision + 1);
                 try output(context, float_decimal.digits[1 .. num_digits]);
-                printed += num_digits - 1;
+                printed += num_digits;
             }
 
             while (printed < precision) : (printed += 1) {
@@ -365,6 +365,9 @@ pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, 
     const exp = float_decimal.exp - 1;
     if (exp >= 0) {
         try output(context, "+");
+    }
+    if (exp > -10 and exp < 10) {
+        try output(context, "0");
     }
     try formatInt(exp, 10, false, 0, context, Errors, output);
 }
@@ -772,13 +775,13 @@ test "fmt.format" {
             var buf1: [32]u8 = undefined;
             const value: f32 = 1.34;
             const result = try bufPrint(buf1[0..], "f32: {e}\n", value);
-            assert(mem.eql(u8, result, "f32: 1.34000003e+0\n"));
+            assert(mem.eql(u8, result, "f32: 1.34000003e+00\n"));
         }
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = 12.34;
             const result = try bufPrint(buf1[0..], "f32: {e}\n", value);
-            assert(mem.eql(u8, result, "f32: 1.23400001e+1\n"));
+            assert(mem.eql(u8, result, "f32: 1.23400001e+01\n"));
         }
         {
             var buf1: [32]u8 = undefined;
@@ -791,6 +794,12 @@ test "fmt.format" {
             const value: f64 = 9.999960e-40;
             const result = try bufPrint(buf1[0..], "f64: {e}\n", value);
             assert(mem.eql(u8, result, "f64: 9.99996e-40\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = 1.409706e-42;
+            const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
+            assert(mem.eql(u8, result, "f64: 1.40971e-42\n"));
         }
         {
             var buf1: [32]u8 = undefined;
@@ -835,7 +844,7 @@ test "fmt.format" {
         {
             var buf1: [32]u8 = undefined;
             const value: f32 = 91.12345;
-            const result = try bufPrint(buf1[0..], "f32: {.}\n", value);
+            const result = try bufPrint(buf1[0..], "f32: {.5}\n", value);
             assert(mem.eql(u8, result, "f32: 91.12345\n"));
         }
         {
