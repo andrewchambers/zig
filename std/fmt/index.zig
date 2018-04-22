@@ -339,7 +339,7 @@ pub fn formatFloatScientific(value: var, maybe_precision: ?usize, context: var, 
             if (float_decimal.digits.len > 1) {
                 const num_digits = math.min(float_decimal.digits.len, precision + 1);
                 try output(context, float_decimal.digits[1 .. num_digits]);
-                printed += num_digits;
+                printed += num_digits - 1;
             }
 
             while (printed < precision) : (printed += 1) {
@@ -813,6 +813,12 @@ test "fmt.format" {
             const value: f64 = @bitCast(f32, u32(814313563));
             const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
             assert(mem.eql(u8, result, "f64: 1.00000e-09\n"));
+        }
+        {
+            var buf1: [32]u8 = undefined;
+            const value: f64 = @bitCast(f32, u32(1006632960));
+            const result = try bufPrint(buf1[0..], "f64: {e5}\n", value);
+            assert(mem.eql(u8, result, "f64: 7.81250e-03\n"));
         }
         {
             var buf1: [32]u8 = undefined;
